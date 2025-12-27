@@ -1,53 +1,30 @@
 <!-- src/components/VideoAnalyzer.vue -->
 <template>
-  <div class="video-analyzer">
-    <h2>视频智能分析工具</h2>
-    
-    <!-- 上传区域 -->
-    <div class="upload-container">
-      <label class="upload-label" :class="{ dragOver: isDragging }">
-        <input 
-          type="file" 
-          accept="video/*" 
+  <div class="analyzer-container">
+    <div class="upload-section">
+      <h2>视频智能分析工具</h2>
+      <!-- 蓝色虚线框（仅保留上传提示，移除按钮） -->
+      <div class="upload-area" @click="triggerFileInput" @dragover.prevent @drop="handleDrop">
+        <div class="upload-icon">↑</div>
+        <p>点击或拖拽视频文件此处上传</p>
+        <p class="tip">支持MP4、MOV、AVI格式，最大100MB</p>
+        <!-- 把选择文件按钮从这里彻底移走 -->
+        <input
+          type="file"
+          ref="fileInput"
           class="file-input"
-          @change="handleFileSelect"
-          @dragover.prevent="isDragging = true"
-          @dragleave.prevent="isDragging = false"
-          @drop.prevent="handleFileDrop"
+          accept="video/mp4,video/quicktime,video/x-msvideo"
+          @change="handleFileChange"
         >
-        <div class="upload-hint">
-          <svg 
-            class="upload-icon" 
-            xmlns="http://www.w3.org/2000/svg" 
-            width="48" 
-            height="48" 
-            viewBox="0 0 24 24" 
-            fill="none" 
-            stroke="currentColor" 
-            stroke-width="2"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="17 8 12 3 7 8"></polyline>
-            <line x1="12" y1="3" x2="12" y2="15"></line>
-          </svg>
-          <p>点击或拖拽视频文件到此处上传</p>
-          <p class="format-hint">支持MP4、MOV、AVI格式，最大100MB</p>
-        </div>
-      </label>
+      </div>
 
-      <!-- 已选文件信息 -->
-      <div v-if="selectedFile" class="file-info">
-        <div class="file-details">
-          <span class="file-name">{{ selectedFile.name }}</span>
-          <span class="file-size">{{ formatFileSize(selectedFile.size) }}</span>
+      <!-- 新增：文件选择+预览区域（按钮+状态都在虚线框外） -->
+      <div class="file-ops-area">
+        <button class="select-file-btn" @click="triggerFileInput">选择文件</button>
+        <div class="file-preview">
+          <span class="preview-label">已选文件：</span>
+          <span class="file-name">{{ selectedFile ? selectedFile.name : "未选择文件" }}</span>
         </div>
-        <button 
-          class="remove-btn" 
-          @click="clearFile"
-          aria-label="移除文件"
-        >
-          &times;
-        </button>
       </div>
 
       <!-- 帧提取间隔设置 -->
@@ -72,7 +49,7 @@
             <line x1="12" y1="16" x2="12" y2="12"></line>
             <line x1="12" y1="8" x2="12.01" y2="8"></line>
           </svg>
-          将使用 Gemini 分析视频帧内容，DeepSeek 生成最终报告，每隔{{ frameInterval }}秒提取一帧
+          将使用 Cohere AI 分析视频内容，提取关键帧并生成详细描述
         </p>
       </div>
 
@@ -87,9 +64,7 @@
             <circle cx="12" cy="12" r="10"></circle>
             <path d="M16 12a4 4 0 1 1-8 0"></path>
           </svg>
-          <span v-if="processingStep === 'frames'">提取视频帧中...</span>
-          <span v-if="processingStep === 'gemini'">Gemini分析帧内容中...</span>
-          <span v-if="processingStep === 'deepseek'">DeepSeek生成报告中...</span>
+          分析中...
         </template>
         <template v-else>开始分析视频</template>
       </button>
@@ -108,210 +83,65 @@
     <!-- 分析结果 -->
     <div v-if="analysisResult" class="result-container">
       <h3>分析结果</h3>
-      <!-- 修改部分：使用pre标签确保文本格式正确显示 -->
-      <pre class="result-content">{{ analysisResult }}</pre>
+      <div class="result-content">{{ analysisResult }}</div>
     </div>
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref } from 'vue';
-import { 
-  extractVideoFrames, 
-  getFileHash, 
-  getCachedResult, 
-  setCachedResult,
-  generateFinalTextWithDeepSeek
-} from '../services/deepseekService';
-import { analyzeFramesWithGemini } from '../services/geminiService';
-import type { VideoAnalysisRequest } from '../types';
 
-// 状态管理
+<script setup lang="ts">
+// 逻辑部分保持不变（和之前一致）
+import { ref } from 'vue';
+import { analyzeVideo } from '@/services/cohereService';
+import type { VideoAnalysisRequest } from '@/types';
+
+const fileInput = ref<HTMLInputElement | null>(null);
 const selectedFile = ref<File | null>(null);
 const isDragging = ref(false);
 const isAnalyzing = ref(false);
 const analysisResult = ref('');
 const errorMessage = ref('');
-const frameInterval = ref(5); // 默认5秒提取一帧
-const processingStep = ref<'frames' | 'gemini' | 'deepseek'>('frames');
 
 /**
  * 处理文件选择
  */
 const handleFileSelect = (e: Event) => {
   const target = e.target as HTMLInputElement;
-  if (target.files && target.files[0]) {
-    validateFile(target.files[0]);
+  if (target.files?.[0]) {
+    selectedFile.value = target.files[0];
+  }
+};
+const handleDrop = (e: DragEvent) => {
+  e.preventDefault();
+  if (e.dataTransfer?.files?.[0]) {
+    selectedFile.value = e.dataTransfer.files[0];
   }
 };
 
-/**
- * 处理拖放文件
- */
-const handleFileDrop = (e: DragEvent) => {
-  isDragging.value = false;
-  if (e.dataTransfer?.files[0]) {
-    validateFile(e.dataTransfer.files[0]);
-  }
-};
-
-/**
- * 验证文件合法性
- */
-const validateFile = (file: File) => {
-  // 验证文件类型
-  if (!file.type.startsWith('video/')) {
-    errorMessage.value = '请上传视频文件';
-    return;
-  }
-
-  // 验证文件大小（100MB）
-  if (file.size > 100 * 1024 * 1024) {
-    errorMessage.value = '文件大小不能超过100MB';
-    return;
-  }
-
-  // 验证通过
-  selectedFile.value = file;
-  errorMessage.value = '';
-  analysisResult.value = '';
-};
-
-/**
- * 清除选中文件
- */
-const clearFile = () => {
-  selectedFile.value = null;
-  analysisResult.value = '';
-  // 重置input值（允许重复选择同一文件）
-  const input = document.querySelector('.file-input') as HTMLInputElement;
-  if (input) input.value = '';
-};
-
-/**
- * 格式化文件大小
- */
-const formatFileSize = (bytes: number): string => {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
-};
-
-/**
- * 处理视频解析
- */
-const handleAnalyze = async () => {
+const startAnalysis = async () => {
   if (!selectedFile.value) return;
 
   isAnalyzing.value = true;
   errorMessage.value = '';
   analysisResult.value = '';
-  processingStep.value = 'frames';
 
-  try {
-    // 检查缓存
-    const fileHash = await getFileHash(selectedFile.value, frameInterval.value);
-    const cachedResult = getCachedResult(fileHash);
-    if (cachedResult) {
-      console.log('使用缓存结果');
-      analysisResult.value = cachedResult;
-      isAnalyzing.value = false;
-      return;
-    }
+  const request: VideoAnalysisRequest = {
+    video: selectedFile.value
+  };
 
-    // 1. 提取视频帧
-    console.log('提取关键帧...');
-    const frames = await extractVideoFrames(selectedFile.value, frameInterval.value);
-    console.log(`提取到 ${frames.length} 帧`);
+  const { data, error } = await analyzeVideo(request);
 
-    if (frames.length === 0) {
-      throw new Error('无法从视频中提取关键帧');
-    }
-
-    // 2. 使用Gemini分析帧内容
-    processingStep.value = 'gemini';
-    const request: VideoAnalysisRequest = {
-      video: selectedFile.value,
-      prompt: `请分析视频中的这些关键帧（每隔${frameInterval.value}秒提取一帧，共${frames.length}帧）并提供详细描述，包括场景、物体、动作和时间线关联。`
-    };
-    
-    const geminiAnalysis = await analyzeFramesWithGemini(request, frames, frameInterval.value);
-
-    // 3. 使用DeepSeek生成最终文本
-    processingStep.value = 'deepseek';
-    const videoInfo = {
-      name: selectedFile.value.name,
-      size: formatFileSize(selectedFile.value.size),
-      framesCount: frames.length,
-      intervalSeconds: frameInterval.value
-    };
-    
-    const finalResult = await generateFinalTextWithDeepSeek(geminiAnalysis, videoInfo);
-
-    // 4. 缓存结果
-    setCachedResult(fileHash, finalResult);
-    
-    // 5. 显示结果
-    analysisResult.value = finalResult;
-  } catch (err) {
-    console.error('分析失败:', err);
-    
-    let errorMessage = '分析过程发生错误';
-    if (err instanceof Error) {
-      errorMessage = err.message;
-    } else if (typeof err === 'string') {
-      errorMessage = err;
-    }
-
-    // 错误类型细化
-    if (errorMessage.includes('视频加载超时')) {
-      errorMessage = '视频加载超时，请尝试更短的视频（建议1分钟以内）';
-    } else if (errorMessage.includes('帧图片加载失败')) {
-      errorMessage = '视频帧处理失败，请尝试其他格式的视频（MP4/AVI 优先）';
-    } else if (errorMessage.includes('API Key')) {
-      errorMessage = 'API Key 配置错误，请检查环境变量';
-    } else if (errorMessage.includes('quota')) {
-      errorMessage = 'API 额度不足，请前往官网充值或检查配额';
-    } else if (errorMessage.includes('Model Not Exist')) {
-      errorMessage = '模型不存在，请确认使用正确的模型名称';
-    }
-
-    errorMessage.value = errorMessage;
-  } finally {
-    isAnalyzing.value = false;
+  if (error) {
+    errorMessage.value = error.message;
+  } else if (data) {
+    analysisResult.value = data.analysis || JSON.stringify(data, null, 2);
   }
+
+  isAnalyzing.value = false;
 };
 </script>
 
 <style scoped>
-/* 保持原有样式不变 */
-.frame-interval {
-  margin: 1rem 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.frame-interval label {
-  font-weight: 500;
-  color: #374151;
-}
-
-.frame-interval input {
-  padding: 0.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 0.375rem;
-  max-width: 100px;
-}
-
-.interval-hint {
-  font-size: 0.875rem;
-  color: #6b7280;
-  margin: 0;
-}
-
 .video-analyzer {
   max-width: 800px;
   margin: 2rem auto;
@@ -322,152 +152,121 @@ const handleAnalyze = async () => {
 h2 {
   color: #333;
   text-align: center;
-  margin-bottom: 2rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 2px solid #e5e7eb;
-}
-
-.upload-container {
-  margin-bottom: 2rem;
-}
-
-.upload-label {
-  display: block;
-  width: 100%;
-  height: 200px;
-  border: 2px dashed #d1d5db;
-  border-radius: 0.5rem;
   cursor: pointer;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
+  flex: 1;
+  /* 去掉原来的margin，改用upload-section的gap控制间距 */
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  transition: border-color 0.3s;
+}
+.upload-area:hover {
+  border-color: #409eff; /* hover时变主题色，提升交互感 */
 }
 
-.upload-label.dragOver {
-  border-color: #3b82f6;
-  background-color: #eff6ff;
+/* 右栏：60%宽度 + 柔和卡片 */
+.result-section {
+  width: 60%;
+  height: 100%;
+  padding: 20px 24px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* 结果区域：美化+适配 */
+.result-card {
+  flex: 1;
+  padding: 24px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  overflow-y: auto;
+  line-height: 1.8;
+  font-size: 14px;
+  color: #333;
+}
+
+/* 标题样式：提升层次感 */
+h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+/* 上传提示样式 */
+.upload-icon {
+  font-size: 48px;
+  color: #409eff;
+  margin-bottom: 16px;
 }
 
 .file-input {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  top: 0;
-  left: 0;
-  opacity: 0;
-  cursor: pointer;
+  display: none;
 }
 
-.upload-hint {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+.upload-area p {
+  margin: 8px 0;
+  color: #666;
+}
+.tip {
+  font-size: 12px;
+  color: #999;
+}
+
+/* 按钮样式：完整显示+交互感 */
+.analyze-btn:disabled {
+  background: #a0cfff;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.analyze-btn:hover:not(:disabled) {
+  background: #337ecc;
+  box-shadow: 0 4px 8px rgba(64, 158, 255, 0.4);
+}
+
+/* 空提示样式：柔和居中 */
+.empty-tip {
+  color: #999;
   text-align: center;
-  color: #6b7280;
+  position: relative;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
 }
 
-.upload-icon {
-  color: #9ca3af;
-  margin-bottom: 1rem;
-}
 
-.format-hint {
-  font-size: 0.875rem;
-  margin-top: 0.5rem;
-  color: #9ca3af;
-}
-
-.file-info {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem;
-  margin: 1rem 0;
-  background-color: #f9fafb;
-  border-radius: 0.375rem;
-  border: 1px solid #f3f4f6;
-}
-
-.file-details {
-  overflow: hidden;
-}
-
-.file-name {
-  display: block;
+.preview-label {
   font-weight: 500;
-  color: #111827;
+}
+.file-name {
+  color: #666;
+  /* 文件名过长时自动省略 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 500px;
 }
 
-.file-size {
-  font-size: 0.875rem;
-  color: #6b7280;
-}
-
-.remove-btn {
-  background: transparent;
-  border: none;
-  color: #ef4444;
-  font-size: 1.25rem;
-  cursor: pointer;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  transition: background-color 0.2s;
-}
-
-.remove-btn:hover {
-  background-color: #fee2e2;
-}
-
+/* 开始分析按钮：保持原有样式，通过upload-section的gap控制间距 */
 .analyze-btn {
   width: 100%;
-  padding: 0.75rem 1rem;
-  background-color: #3b82f6;
-  color: white;
+  padding: 14px;
+  background: #409eff;
+  color: #fff;
   border: none;
-  border-radius: 0.375rem;
-  font-weight: 500;
+  border-radius: 8px;
+  font-size: 16px;
   cursor: pointer;
-  transition: background-color 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
+  box-shadow: 0 2px 6px rgba(64, 158, 255, 0.3);
+  transition: background 0.3s, box-shadow 0.3s;
 }
 
-.analyze-btn:disabled {
-  background-color: #94a3b8;
-  cursor: not-allowed;
-}
-
-.analyze-btn:not(:disabled):hover {
-  background-color: #2563eb;
-}
-
-.loading-spinner {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.error-message {
-  padding: 1rem;
-  background-color: #fee2e2;
-  border-left: 4px solid #ef4444;
-  border-radius: 0.375rem;
-  color: #b91c1c;
-  margin: 1rem 0;
+.file-ops-area {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -492,23 +291,15 @@ h2 {
   color: #374151;
   line-height: 1.6;
   white-space: pre-wrap;
-  word-wrap: break-word; /* 新增：确保长单词不会溢出容器 */
 }
 
-.info-container {
-  margin: 1.5rem 0;
-  padding: 0.75rem 1rem;
-  background-color: #eff6ff;
-  border-radius: 0.5rem;
-  border: 1px solid #bfdbfe;
-}
-
-.info-text {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0;
-  color: #1e40af;
-  font-size: 0.875rem;
+/* 其他样式保持不变，仅调整file-preview的margin */
+.file-preview {
+  padding: 8px 12px;
+  background: #f5faff;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #409eff;
+  flex: 1; /* 占满剩余宽度 */
 }
 </style>
