@@ -1,6 +1,6 @@
 <template>
   <div class="video-analyzer">
-    <h2>视频智能解析工具</h2>
+    <h2>视频智能分析工具</h2>
     
     <!-- 上传区域 -->
     <div class="upload-container">
@@ -49,6 +49,18 @@
         </button>
       </div>
 
+      <!-- 提示信息 -->
+      <div v-if="selectedFile" class="info-container">
+        <p class="info-text">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+          将使用 Cohere AI 分析视频内容，提取关键帧并生成详细描述
+        </p>
+      </div>
+
       <!-- 解析按钮 -->
       <button 
         class="analyze-btn"
@@ -60,9 +72,9 @@
             <circle cx="12" cy="12" r="10"></circle>
             <path d="M16 12a4 4 0 1 1-8 0"></path>
           </svg>
-          解析中...
+          分析中...
         </template>
-        <template v-else>开始解析视频</template>
+        <template v-else>开始分析视频</template>
       </button>
     </div>
 
@@ -76,9 +88,9 @@
       {{ errorMessage }}
     </div>
 
-    <!-- 解析结果 -->
+    <!-- 分析结果 -->
     <div v-if="analysisResult" class="result-container">
-      <h3>解析结果</h3>
+      <h3>分析结果</h3>
       <div class="result-content">{{ analysisResult }}</div>
     </div>
   </div>
@@ -86,7 +98,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { analyzeVideo } from '@/services/googleAiService';
+import { analyzeVideo } from '@/services/cohereService';
 import type { VideoAnalysisRequest } from '@/types';
 
 // 状态管理
@@ -367,5 +379,22 @@ h2 {
   color: #374151;
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.info-container {
+  margin: 1.5rem 0;
+  padding: 0.75rem 1rem;
+  background-color: #eff6ff;
+  border-radius: 0.5rem;
+  border: 1px solid #bfdbfe;
+}
+
+.info-text {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: #1e40af;
+  font-size: 0.875rem;
 }
 </style>
