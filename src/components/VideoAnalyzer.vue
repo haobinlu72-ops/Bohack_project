@@ -3,12 +3,11 @@
   <div class="analyzer-container">
     <div class="upload-section">
       <h2>视频智能分析工具</h2>
-      <!-- 蓝色虚线框（仅保留上传提示，移除按钮） -->
+      <!-- 上传区域 -->
       <div class="upload-area" @click="triggerFileInput" @dragover.prevent @drop="handleDrop">
         <div class="upload-icon">↑</div>
         <p>点击或拖拽视频文件此处上传</p>
         <p class="tip">支持MP4、MOV、AVI格式，最大100MB</p>
-        <!-- 把选择文件按钮从这里彻底移走 -->
         <input
           type="file"
           ref="fileInput"
@@ -18,27 +17,13 @@
         >
       </div>
 
-      <!-- 新增：文件选择+预览区域（按钮+状态都在虚线框外） -->
+      <!-- 文件选择+预览区域 -->
       <div class="file-ops-area">
         <button class="select-file-btn" @click="triggerFileInput">选择文件</button>
         <div class="file-preview">
           <span class="preview-label">已选文件：</span>
           <span class="file-name">{{ selectedFile ? selectedFile.name : "未选择文件" }}</span>
         </div>
-      </div>
-
-      <!-- 帧提取间隔设置 -->
-      <div v-if="selectedFile" class="frame-interval">
-        <label for="interval">关键帧提取间隔 (秒):</label>
-        <input
-          type="number"
-          id="interval"
-          v-model.number="frameInterval"
-          min="1"
-          max="60"
-          step="1"
-        >
-        <p class="interval-hint">建议值: 3-10秒，间隔越小分析越精细但耗时越长</p>
       </div>
 
       <!-- 提示信息 -->
@@ -49,7 +34,7 @@
             <line x1="12" y1="16" x2="12" y2="12"></line>
             <line x1="12" y1="8" x2="12.01" y2="8"></line>
           </svg>
-          将使用 Cohere AI 分析视频内容，提取关键帧并生成详细描述
+          将使用 Gemini AI 直接分析视频内容，生成详细描述
         </p>
       </div>
 
@@ -90,35 +75,41 @@
 
 
 <script setup lang="ts">
-// 逻辑部分保持不变（和之前一致）
 import { ref } from 'vue';
-import { analyzeVideo } from '@/services/cohereService';
+import { analyzeVideo } from '@/services/videoAnalysisService';
 import type { VideoAnalysisRequest } from '@/types';
 
 const fileInput = ref<HTMLInputElement | null>(null);
 const selectedFile = ref<File | null>(null);
-const isDragging = ref(false);
 const isAnalyzing = ref(false);
 const analysisResult = ref('');
 const errorMessage = ref('');
 
-/**
- * 处理文件选择
- */
-const handleFileSelect = (e: Event) => {
+// 触发文件选择
+const triggerFileInput = () => {
+  fileInput.value?.click();
+};
+
+// 处理文件选择
+const handleFileChange = (e: Event) => {
   const target = e.target as HTMLInputElement;
   if (target.files?.[0]) {
     selectedFile.value = target.files[0];
+    errorMessage.value = '';
   }
 };
+
+// 处理拖放文件
 const handleDrop = (e: DragEvent) => {
   e.preventDefault();
   if (e.dataTransfer?.files?.[0]) {
     selectedFile.value = e.dataTransfer.files[0];
+    errorMessage.value = '';
   }
 };
 
-const startAnalysis = async () => {
+// 处理分析
+const handleAnalyze = async () => {
   if (!selectedFile.value) return;
 
   isAnalyzing.value = true;
@@ -134,7 +125,7 @@ const startAnalysis = async () => {
   if (error) {
     errorMessage.value = error.message;
   } else if (data) {
-    analysisResult.value = data.analysis || JSON.stringify(data, null, 2);
+    analysisResult.value = data.analysis;
   }
 
   isAnalyzing.value = false;
@@ -142,64 +133,37 @@ const startAnalysis = async () => {
 </script>
 
 <style scoped>
-.video-analyzer {
+.analyzer-container {
   max-width: 800px;
   margin: 2rem auto;
   padding: 0 1rem;
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.upload-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 h2 {
   color: #333;
   text-align: center;
-  cursor: pointer;
-  flex: 1;
-  /* 去掉原来的margin，改用upload-section的gap控制间距 */
   margin: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+}
+
+.upload-area {
+  border: 2px dashed #409eff;
+  border-radius: 8px;
+  padding: 2rem;
+  text-align: center;
+  cursor: pointer;
   transition: border-color 0.3s;
 }
+
 .upload-area:hover {
-  border-color: #409eff; /* hover时变主题色，提升交互感 */
+  border-color: #337ecc;
 }
 
-/* 右栏：60%宽度 + 柔和卡片 */
-.result-section {
-  width: 60%;
-  height: 100%;
-  padding: 20px 24px;
-  background: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-/* 结果区域：美化+适配 */
-.result-card {
-  flex: 1;
-  padding: 24px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  overflow-y: auto;
-  line-height: 1.8;
-  font-size: 14px;
-  color: #333;
-}
-
-/* 标题样式：提升层次感 */
-h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #2c3e50;
-}
-
-/* 上传提示样式 */
 .upload-icon {
   font-size: 48px;
   color: #409eff;
@@ -214,45 +178,62 @@ h2 {
   margin: 8px 0;
   color: #666;
 }
+
 .tip {
   font-size: 12px;
   color: #999;
 }
 
-/* 按钮样式：完整显示+交互感 */
-.analyze-btn:disabled {
-  background: #a0cfff;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-.analyze-btn:hover:not(:disabled) {
-  background: #337ecc;
-  box-shadow: 0 4px 8px rgba(64, 158, 255, 0.4);
+.file-ops-area {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-/* 空提示样式：柔和居中 */
-.empty-tip {
-  color: #999;
-  text-align: center;
-  position: relative;
-  top: 50%;
-  transform: translateY(-50%);
+.select-file-btn {
+  padding: 8px 16px;
+  background: #f5f7fa;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.select-file-btn:hover {
+  background: #e9eef3;
+}
+
+.file-preview {
+  padding: 8px 12px;
+  background: #f5faff;
+  border-radius: 6px;
   font-size: 14px;
-}
-
-
-.preview-label {
-  font-weight: 500;
-}
-.file-name {
-  color: #666;
-  /* 文件名过长时自动省略 */
+  color: #409eff;
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* 开始分析按钮：保持原有样式，通过upload-section的gap控制间距 */
+.preview-label {
+  font-weight: 500;
+}
+
+.info-container {
+  padding: 12px;
+  background: #f0f9eb;
+  border-radius: 4px;
+  color: #67c23a;
+  font-size: 14px;
+}
+
+.info-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
 .analyze-btn {
   width: 100%;
   padding: 14px;
@@ -264,12 +245,33 @@ h2 {
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(64, 158, 255, 0.3);
   transition: background 0.3s, box-shadow 0.3s;
-}
-
-.file-ops-area {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  gap: 8px;
+}
+
+.analyze-btn:disabled {
+  background: #a0cfff;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.analyze-btn:hover:not(:disabled) {
+  background: #337ecc;
+  box-shadow: 0 4px 8px rgba(64, 158, 255, 0.4);
+}
+
+.error-message {
+  margin-top: 1rem;
+  padding: 12px;
+  background: #fef0f0;
+  border-radius: 4px;
+  color: #f56c6c;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .result-container {
@@ -291,15 +293,5 @@ h2 {
   color: #374151;
   line-height: 1.6;
   white-space: pre-wrap;
-}
-
-/* 其他样式保持不变，仅调整file-preview的margin */
-.file-preview {
-  padding: 8px 12px;
-  background: #f5faff;
-  border-radius: 6px;
-  font-size: 14px;
-  color: #409eff;
-  flex: 1; /* 占满剩余宽度 */
 }
 </style>
