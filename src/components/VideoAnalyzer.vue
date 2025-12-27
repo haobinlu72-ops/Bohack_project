@@ -1,3 +1,4 @@
+<!-- src/components/VideoAnalyzer.vue -->
 <template>
   <div class="video-analyzer">
     <h2>视频智能分析工具</h2>
@@ -49,6 +50,20 @@
         </button>
       </div>
 
+      <!-- 帧提取间隔设置 -->
+      <div v-if="selectedFile" class="frame-interval">
+        <label for="interval">关键帧提取间隔 (秒):</label>
+        <input
+          type="number"
+          id="interval"
+          v-model.number="frameInterval"
+          min="1"
+          max="60"
+          step="1"
+        >
+        <p class="interval-hint">建议值: 3-10秒，间隔越小分析越精细但耗时越长</p>
+      </div>
+
       <!-- 提示信息 -->
       <div v-if="selectedFile" class="info-container">
         <p class="info-text">
@@ -57,7 +72,7 @@
             <line x1="12" y1="16" x2="12" y2="12"></line>
             <line x1="12" y1="8" x2="12.01" y2="8"></line>
           </svg>
-          将使用 Cohere AI 分析视频内容，提取关键帧并生成详细描述
+          将使用 Gemini 分析视频帧内容，DeepSeek 生成最终报告，每隔{{ frameInterval }}秒提取一帧
         </p>
       </div>
 
@@ -72,7 +87,9 @@
             <circle cx="12" cy="12" r="10"></circle>
             <path d="M16 12a4 4 0 1 1-8 0"></path>
           </svg>
-          分析中...
+          <span v-if="processingStep === 'frames'">提取视频帧中...</span>
+          <span v-if="processingStep === 'gemini'">Gemini分析帧内容中...</span>
+          <span v-if="processingStep === 'deepseek'">DeepSeek生成报告中...</span>
         </template>
         <template v-else>开始分析视频</template>
       </button>
@@ -91,15 +108,23 @@
     <!-- 分析结果 -->
     <div v-if="analysisResult" class="result-container">
       <h3>分析结果</h3>
-      <div class="result-content">{{ analysisResult }}</div>
+      <!-- 修改部分：使用pre标签确保文本格式正确显示 -->
+      <pre class="result-content">{{ analysisResult }}</pre>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { analyzeVideo } from '@/services/cohereService';
-import type { VideoAnalysisRequest } from '@/types';
+import { 
+  extractVideoFrames, 
+  getFileHash, 
+  getCachedResult, 
+  setCachedResult,
+  generateFinalTextWithDeepSeek
+} from '../services/deepseekService';
+import { analyzeFramesWithGemini } from '../services/geminiService';
+import type { VideoAnalysisRequest } from '../types';
 
 // 状态管理
 const selectedFile = ref<File | null>(null);
@@ -107,6 +132,8 @@ const isDragging = ref(false);
 const isAnalyzing = ref(false);
 const analysisResult = ref('');
 const errorMessage = ref('');
+const frameInterval = ref(5); // 默认5秒提取一帧
+const processingStep = ref<'frames' | 'gemini' | 'deepseek'>('frames');
 
 /**
  * 处理文件选择
@@ -181,24 +208,110 @@ const handleAnalyze = async () => {
   isAnalyzing.value = true;
   errorMessage.value = '';
   analysisResult.value = '';
+  processingStep.value = 'frames';
 
-  const request: VideoAnalysisRequest = {
-    video: selectedFile.value
-  };
+  try {
+    // 检查缓存
+    const fileHash = await getFileHash(selectedFile.value, frameInterval.value);
+    const cachedResult = getCachedResult(fileHash);
+    if (cachedResult) {
+      console.log('使用缓存结果');
+      analysisResult.value = cachedResult;
+      isAnalyzing.value = false;
+      return;
+    }
 
-  const { data, error } = await analyzeVideo(request);
+    // 1. 提取视频帧
+    console.log('提取关键帧...');
+    const frames = await extractVideoFrames(selectedFile.value, frameInterval.value);
+    console.log(`提取到 ${frames.length} 帧`);
 
-  if (error) {
-    errorMessage.value = error.message;
-  } else if (data) {
-    analysisResult.value = data.analysis || JSON.stringify(data, null, 2);
+    if (frames.length === 0) {
+      throw new Error('无法从视频中提取关键帧');
+    }
+
+    // 2. 使用Gemini分析帧内容
+    processingStep.value = 'gemini';
+    const request: VideoAnalysisRequest = {
+      video: selectedFile.value,
+      prompt: `请分析视频中的这些关键帧（每隔${frameInterval.value}秒提取一帧，共${frames.length}帧）并提供详细描述，包括场景、物体、动作和时间线关联。`
+    };
+    
+    const geminiAnalysis = await analyzeFramesWithGemini(request, frames, frameInterval.value);
+
+    // 3. 使用DeepSeek生成最终文本
+    processingStep.value = 'deepseek';
+    const videoInfo = {
+      name: selectedFile.value.name,
+      size: formatFileSize(selectedFile.value.size),
+      framesCount: frames.length,
+      intervalSeconds: frameInterval.value
+    };
+    
+    const finalResult = await generateFinalTextWithDeepSeek(geminiAnalysis, videoInfo);
+
+    // 4. 缓存结果
+    setCachedResult(fileHash, finalResult);
+    
+    // 5. 显示结果
+    analysisResult.value = finalResult;
+  } catch (err) {
+    console.error('分析失败:', err);
+    
+    let errorMessage = '分析过程发生错误';
+    if (err instanceof Error) {
+      errorMessage = err.message;
+    } else if (typeof err === 'string') {
+      errorMessage = err;
+    }
+
+    // 错误类型细化
+    if (errorMessage.includes('视频加载超时')) {
+      errorMessage = '视频加载超时，请尝试更短的视频（建议1分钟以内）';
+    } else if (errorMessage.includes('帧图片加载失败')) {
+      errorMessage = '视频帧处理失败，请尝试其他格式的视频（MP4/AVI 优先）';
+    } else if (errorMessage.includes('API Key')) {
+      errorMessage = 'API Key 配置错误，请检查环境变量';
+    } else if (errorMessage.includes('quota')) {
+      errorMessage = 'API 额度不足，请前往官网充值或检查配额';
+    } else if (errorMessage.includes('Model Not Exist')) {
+      errorMessage = '模型不存在，请确认使用正确的模型名称';
+    }
+
+    errorMessage.value = errorMessage;
+  } finally {
+    isAnalyzing.value = false;
   }
-
-  isAnalyzing.value = false;
 };
 </script>
 
 <style scoped>
+/* 保持原有样式不变 */
+.frame-interval {
+  margin: 1rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.frame-interval label {
+  font-weight: 500;
+  color: #374151;
+}
+
+.frame-interval input {
+  padding: 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  max-width: 100px;
+}
+
+.interval-hint {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0;
+}
+
 .video-analyzer {
   max-width: 800px;
   margin: 2rem auto;
@@ -379,6 +492,7 @@ h2 {
   color: #374151;
   line-height: 1.6;
   white-space: pre-wrap;
+  word-wrap: break-word; /* 新增：确保长单词不会溢出容器 */
 }
 
 .info-container {

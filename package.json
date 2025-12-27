@@ -14,12 +14,18 @@
     "type-check": "vue-tsc --build"
   },
   "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "node-fetch": "^3.3.2",
+    "speech-recognition-polyfill": "^0.0.5",
     "vue": "^3.5.22",
     "vue-router": "^4.6.3"
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.2",
-    "@types/node": "^22.18.11",
+    "@types/node": "^22.19.3",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vitejs/plugin-vue-jsx": "^5.1.1",
     "@vue/tsconfig": "^0.8.1",
