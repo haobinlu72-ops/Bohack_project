@@ -1,33 +1,26 @@
 <template>
-  <!-- 视频解析工具主页面 -->
+  <!-- 直接引入视频解析组件，和你原有代码一致，无需改动 -->
   <VideoAnalyzer />
 </template>
 
-<script lang="ts">
-// 引入视频解析组件（替代原List组件）
+<script setup lang="ts">
+// 引入你的 VideoAnalyzer 组件，路径确保正确（和你原有一致）
 import VideoAnalyzer from './components/VideoAnalyzer.vue';
-
-export default {
-  name: 'App',
-  components: {
-    VideoAnalyzer // 注册视频解析组件
-  }
-};
 </script>
 
 <style>
-/* 全局基础样式 */
-body {
+/* 强制根容器全屏，解决撑不满、有空隙的核心样式 */
+html, body {
+  width: 100%;
+  height: 100%;
   margin: 0;
-  padding: 20px;
-  background-color: #f0f2f5;
-  min-height: 100vh;
-  box-sizing: border-box;
+  padding: 0;
 }
 
-/* 确保根容器充满可用空间 */
 #app {
-  max-width: 1200px;
-  margin: 0 auto;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 </style>
