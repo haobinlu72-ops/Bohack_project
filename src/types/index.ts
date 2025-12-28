@@ -2,6 +2,7 @@
 export interface VideoAnalysisRequest {
   video: File;
   prompt?: string; // 自定义分析提示词（可选）
+  frameInterval: number; // 新增：帧间隔参数
 }
 
 export interface VideoAnalysisResponse {

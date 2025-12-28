@@ -22,8 +22,8 @@ export async function analyzeVideo(
   request: VideoAnalysisRequest
 ): Promise<{ data?: VideoAnalysisResponse; error?: AnalysisError }> {
   try {
-    // 检查缓存 - 修复了getFileHash的参数问题
-    const interval = 5; // 帧提取间隔，与extractVideoFrames保持一致
+    // 检查缓存 - 使用请求中的帧间隔
+    const interval = request.frameInterval; // 从请求获取帧间隔，而不是固定值
     const fileHash = await getFileHash(request.video, interval);
     const cachedResult = getCachedResult(fileHash);
     
@@ -37,8 +37,8 @@ export async function analyzeVideo(
       };
     }
 
-    // 提取视频帧
-    console.log('开始提取视频帧...');
+    // 提取视频帧 - 使用用户指定的间隔
+    console.log(`开始提取视频帧，间隔${interval}秒...`);
     const frames = await extractVideoFrames(request.video, interval);
     console.log(`成功提取 ${frames.length} 帧`);
 

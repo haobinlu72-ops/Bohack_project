@@ -26,6 +26,20 @@
         </div>
       </div>
 
+      <!-- 添加帧间隔控制 -->
+      <div v-if="selectedFile" class="frame-interval-control">
+        <label for="frameInterval">关键帧间隔（秒）：</label>
+        <input
+          type="number"
+          id="frameInterval"
+          v-model.number="frameInterval"
+          min="1"
+          max="30"
+          step="1"
+        >
+        <p class="interval-tip">建议值：3-10秒，值越小分析越精细但耗时越长</p>
+      </div>
+
       <!-- 提示信息 -->
       <div v-if="selectedFile" class="info-container">
         <p class="info-text">
@@ -42,7 +56,7 @@
       <button 
         class="analyze-btn"
         @click="handleAnalyze"
-        :disabled="!selectedFile || isAnalyzing"
+        :disabled="!selectedFile || isAnalyzing || frameInterval < 1"
       >
         <template v-if="isAnalyzing">
           <svg class="loading-spinner" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -84,6 +98,8 @@ const selectedFile = ref<File | null>(null);
 const isAnalyzing = ref(false);
 const analysisResult = ref('');
 const errorMessage = ref('');
+// 添加帧间隔响应式变量，默认5秒
+const frameInterval = ref(5);
 
 // 触发文件选择
 const triggerFileInput = () => {
@@ -110,14 +126,15 @@ const handleDrop = (e: DragEvent) => {
 
 // 处理分析
 const handleAnalyze = async () => {
-  if (!selectedFile.value) return;
+  if (!selectedFile.value || frameInterval.value < 1) return;
 
   isAnalyzing.value = true;
   errorMessage.value = '';
   analysisResult.value = '';
 
   const request: VideoAnalysisRequest = {
-    video: selectedFile.value
+    video: selectedFile.value,
+    frameInterval: frameInterval.value // 传递帧间隔参数
   };
 
   const { data, error } = await analyzeVideo(request);
@@ -217,6 +234,28 @@ h2 {
 
 .preview-label {
   font-weight: 500;
+}
+
+/* 添加帧间隔控制样式 */
+.frame-interval-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+
+.frame-interval-control input {
+  width: 60px;
+  padding: 6px 8px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+}
+
+.interval-tip {
+  margin: 0;
+  font-size: 12px;
+  color: #999;
+  flex: 1;
 }
 
 .info-container {

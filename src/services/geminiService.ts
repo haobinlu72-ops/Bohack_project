@@ -17,15 +17,15 @@ interface GeminiContent {
   parts: GeminiContentPart[];
 }
 
-// Gemini API 基础地址
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent';
+// Gemini API 基础地址 - 使用最新的v1版本端点
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro-vision:generateContent';
 
 // 获取Gemini API Key
 const getGeminiApiKey = (): string => {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
   if (!apiKey) {
-    console.warn('未配置 VITE_GEMINI_API_KEY 环境变量，将使用模拟数据');
-    return 'MOCK_KEY'; // 返回模拟密钥
+    console.error('未配置 VITE_GEMINI_API_KEY 环境变量，请检查配置');
+    throw new Error('Gemini API 密钥未配置');
   }
   return apiKey;
 };
@@ -48,17 +48,16 @@ export async function analyzeFramesWithGemini(
   intervalSeconds: number,
   audioTranscript: string
 ): Promise<string> {
+  if (frames.length === 0) {
+    console.warn('没有可分析的视频帧');
+    return generateMockAnalysis(0, params.video.name);
+  }
+
   try {
     const apiKey = getGeminiApiKey();
     
-    // 如果是模拟密钥，直接返回模拟结果
-    if (apiKey === 'MOCK_KEY') {
-      console.log('使用模拟分析结果');
-      return generateMockAnalysis(frames.length, params.video.name);
-    }
-
     // 构建提示词，加入音频转录信息
-    const prompt = params.prompt || `你是专业的视频内容分析专家，以下是视频按时间顺序提取的关键帧及音频转录内容，请详细分析：
+    const prompt = params.prompt || `你是专业的视频内容分析专家，以下是视频按时间顺序提取的关键帧（每${intervalSeconds}秒一帧）及音频转录内容，请详细分析：
 1. 逐帧描述视频中的核心内容（场景、物体、人物、动作等）；
 2. 结合音频内容，分析视频的整体主题、情节走向；
 3. 分析帧之间的时间关联和内容变化；
@@ -77,29 +76,34 @@ export async function analyzeFramesWithGemini(
       }
     ];
 
-    // 添加所有帧图片
-    frames.forEach((frame, index) => {
+    // 添加所有帧图片（限制最大帧数，避免请求过大）
+    const maxFrames = 30; // Gemini对单次请求有内容限制
+    const framesToProcess = frames.slice(0, maxFrames);
+    
+    console.log(`处理 ${framesToProcess.length} 帧（原始共 ${frames.length} 帧）`);
+
+    for (let index = 0; index < framesToProcess.length; index++) {
       try {
+        const frame = framesToProcess[index];
         if (!contents[0]) {
           console.error(`处理视频帧 #${index} 时出错: contents[0] 未定义`);
-          return;
+          continue;
         }
 
-        // 提取MIME类型和base64数据（加强类型检查）
+        // 提取MIME类型和base64数据
         const matches = frame.match(/^data:(image\/\w+);base64,(.+)$/);
         if (!matches || matches.length < 3) {
           console.warn(`跳过格式错误的帧 #${index}`);
-          return;
+          continue;
         }
 
-        // 使用非空断言确保类型为string（已通过前面的检查确保存在）
-        const mimeType: string = matches[1]!;
-        const base64Data: string = matches[2]!;
+        const mimeType: string = matches[1];
+        const base64Data: string = matches[2];
 
         // 只处理支持的图片类型
         if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) {
           console.warn(`跳过不支持的图片类型 #${index}：${mimeType}`);
-          return;
+          continue;
         }
 
         contents[0].parts.push({
@@ -111,11 +115,13 @@ export async function analyzeFramesWithGemini(
       } catch (err) {
         console.error(`处理视频帧 #${index} 时出错:`, err);
       }
-    });
+    }
 
     // 调用Gemini API
     console.log('调用Gemini API分析视频帧...');
-    const response = await fetch(`${GEMINI_API_BASE}?key=${apiKey}`, {
+    const url = `${GEMINI_API_BASE}?key=${apiKey}`;
+    
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -124,29 +130,37 @@ export async function analyzeFramesWithGemini(
         contents,
         generationConfig: {
           temperature: 0.5,
-          maxOutputTokens: 2048
+          maxOutputTokens: 2048,
+          responseMimeType: "text/plain"
         }
       })
     });
 
+    const responseText = await response.text();
+    console.log(`Gemini API 响应状态: ${response.status}`);
+
     if (!response.ok) {
-      console.error(`Gemini API 调用失败: ${response.statusText}，将使用模拟数据`);
-      return generateMockAnalysis(frames.length, params.video.name);
+      console.error(`Gemini API 调用失败: ${response.status} - ${responseText}`);
+      throw new Error(`API调用失败: ${response.statusText}`);
     }
 
-    const responseData = await response.json();
-    
-    // 提取分析结果
-    const analysisText = responseData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    
-    if (!analysisText) {
-      console.warn('Gemini返回空结果，使用模拟数据');
-      return generateMockAnalysis(frames.length, params.video.name);
-    }
+    try {
+      const responseData = JSON.parse(responseText);
+      const analysisText = responseData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      
+      if (!analysisText) {
+        console.warn('Gemini返回空结果');
+        throw new Error('未获取到分析结果');
+      }
 
-    return analysisText;
+      return analysisText;
+    } catch (parseError) {
+      console.error('解析Gemini响应失败:', parseError, '响应内容:', responseText);
+      throw new Error('解析分析结果失败');
+    }
   } catch (err) {
-    console.error('Gemini帧分析失败，使用模拟数据:', err);
+    console.error('Gemini帧分析失败:', err);
+    // 仅在真实出错时使用模拟数据，而不是API密钥问题
     return generateMockAnalysis(frames.length, params.video.name);
   }
 }

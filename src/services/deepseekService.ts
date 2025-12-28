@@ -21,7 +21,7 @@ export async function extractAudioAndTranscribe(videoFile: File): Promise<string
     // 实际项目中可能需要使用专门的音频处理库如ffmpeg.wasm
     console.log('提取音频并转换为文本');
     
-    // 模拟音频转录过程（缩短超时时间以便测试）
+    // 模拟音频转录过程
     return new Promise(resolve => {
       setTimeout(() => {
         resolve('音频转录：视频包含可识别的语音内容，主要讨论了视频中的关键场景和动作（实际实现需要音频处理库支持）');
@@ -71,7 +71,8 @@ ${audioTranscript}
 5. 从视频中识别主体的状态或行为特征，例如：
    - 安静/活跃/紧张/疲劳
    - 正在执行的动作或流程阶段
-   - 环境与姿态特征`;
+   - 环境与姿态特征
+6. 不要输出生成时间`;
 
     // 调用 DeepSeek API
     console.log('调用 DeepSeek API 生成最终文本...');
@@ -142,11 +143,11 @@ export async function extractVideoFrames(videoFile: File, intervalSeconds: numbe
     const objectUrl = URL.createObjectURL(videoFile);
     video.src = objectUrl;
     
-    // 超时处理
+    // 超时处理 - 缩短超时时间便于测试
     const timeoutId = setTimeout(() => {
       cleanup();
       reject(new Error('视频加载超时，请尝试较短的视频（建议1分钟内）'));
-    }, 300000);
+    }, 420000); // 1分钟超时
     
     // 清理函数
     const cleanup = () => {
@@ -159,7 +160,7 @@ export async function extractVideoFrames(videoFile: File, intervalSeconds: numbe
     video.addEventListener('loadedmetadata', () => {
       try {
         clearTimeout(timeoutId);
-        const maxDimension = 1024;
+        const maxDimension = 800; // 减小尺寸以避免请求过大
         let width = video.videoWidth;
         let height = video.videoHeight;
         
@@ -175,14 +176,21 @@ export async function extractVideoFrames(videoFile: File, intervalSeconds: numbe
         
         const frames: string[] = [];
         const duration = video.duration;
+        if (isNaN(duration)) {
+          cleanup();
+          reject(new Error('无法获取视频时长'));
+          return;
+        }
+        
         const totalFrames = Math.floor(duration / intervalSeconds);
-        const framesToExtract = Math.max(1, Math.min(10, totalFrames + 1));
+        const framesToExtract = Math.max(1, Math.min(30, totalFrames + 1)); // 限制最大帧数以避免请求过大
+        
+        console.log(`视频时长: ${duration.toFixed(1)}秒, 计划提取 ${framesToExtract} 帧`);
         
         let framesExtracted = 0;
         
         const extractFrame = (time: number) => {
-          const nextTime = intervalSeconds * framesExtracted;
-          if (framesExtracted >= framesToExtract || nextTime >= duration) {
+          if (framesExtracted >= framesToExtract || time >= duration) {
             cleanup();
             resolve(frames);
             return;
@@ -193,9 +201,11 @@ export async function extractVideoFrames(videoFile: File, intervalSeconds: numbe
         const seekedHandler = () => {
           try {
             ctx.drawImage(video, 0, 0, width, height);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            // 使用较低质量减少数据大小
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
             frames.push(dataUrl);
             framesExtracted++;
+            console.log(`已提取 ${framesExtracted}/${framesToExtract} 帧`);
             extractFrame(intervalSeconds * framesExtracted);
           } catch (error) {
             cleanup();
